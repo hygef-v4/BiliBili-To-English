@@ -49,6 +49,7 @@
         "languages/fr.js",
         "languages/ja.js",
         "languages/ru.js",
+        "languages/vi.js",
         "languages/languageManager.js",
         "settings/Settings.js",
         "translation/engines/google.js",
