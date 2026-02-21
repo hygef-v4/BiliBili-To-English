@@ -840,7 +840,6 @@
       if (!node || node.nodeType !== Node.TEXT_NODE || !node.parentElement) return;
       if (!node.isConnected) return;
       if (this.shouldSkipElement(node.parentElement)) return;
-      if (node.parentElement.closest("[data-bte-owned='1']")) return;
       const area = this.detectArea(node.parentElement);
       if (!this.isAreaEnabled(area) || area === "captions") return;
       const mode = modeFromSettings(this.settings, area);
@@ -938,9 +937,13 @@
       if (!this.canRun()) return;
       if (!element || element.nodeType !== Node.ELEMENT_NODE) return;
       if (!element.isConnected) return;
-      const area = this.detectArea(element);
-      if (!this.isAreaEnabled(area) || area === "captions") return;
+      // shouldSkipElement is checked first: owned/SKIP_TAG/contenteditable elements
+      // exit before paying for detectArea's CSS closest() calls.
+      // It also guards area === "captions" internally, so isAreaEnabled only needs
+      // to check whether the surviving area is enabled.
       if (this.shouldSkipElement(element)) return;
+      const area = this.detectArea(element);
+      if (!this.isAreaEnabled(area)) return;
       const bucket = this.ensureAttrState(element);
       const titleCase = this.isLikelyTagElement(element);
       ATTRS.forEach((attr) => {

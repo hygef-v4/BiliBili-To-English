@@ -66,8 +66,18 @@
   const CAPTION_INTERACTIVE_ANCESTOR_SELECTOR = CAPTION_INTERACTIVE_ANCESTOR_SELECTORS.join(",");
   const CAPTION_INTERACTIVE_DESCENDANT_SELECTOR = CAPTION_INTERACTIVE_DESCENDANT_SELECTORS.join(",");
 
+  // Constant event-name array — avoids allocating a new array on every bind/unbind call
+  const VIDEO_EVENTS = ["loadedmetadata", "play", "seeked", "durationchange"];
+
   function normalizeLine(text) {
-    return String(text || "")
+    const s = String(text || "");
+    if (!s) return "";
+    // Fast path: single-line subtitle (no \r, no \n) — the overwhelming common case.
+    // Avoids creating split/map/filter/join intermediate arrays on every subtitle node.
+    if (!s.includes("\r") && !s.includes("\n")) {
+      return s.replace(/\s+/g, " ").trim();
+    }
+    return s
       .replace(/\r/g, "")
       .split("\n")
       .map((part) => part.replace(/\s+/g, " ").trim())
@@ -300,7 +310,7 @@
         if (!video || video === this.videoElement) return;
         this.unbindVideoSignals();
         this.videoElement = video;
-        ["loadedmetadata", "play", "seeked", "durationchange"].forEach((eventName) => {
+        VIDEO_EVENTS.forEach((eventName) => {
           this.videoElement.addEventListener(eventName, this.handleVideoSignal, { passive: true });
         });
         this.prefetchCurrentVideo(true);
@@ -309,7 +319,7 @@
 
     unbindVideoSignals() {
       if (this.videoElement) {
-        ["loadedmetadata", "play", "seeked", "durationchange"].forEach((eventName) => {
+        VIDEO_EVENTS.forEach((eventName) => {
           this.videoElement.removeEventListener(eventName, this.handleVideoSignal);
         });
       }
@@ -852,6 +862,9 @@
 
     enqueueWindowPrefetch(cacheKey, payload, focusLine) {
       if (!payload || this.currentVideoCacheKey !== cacheKey) return;
+      // All lines already translated — getWindowCandidateLines would iterate timed[] (500+ entries)
+      // every 80 ms for nothing. Skip the work entirely.
+      if (payload.prefetchPhase === "complete") return;
       const candidates = this.getWindowCandidateLines(payload, focusLine);
       if (!candidates.length) return;
 
