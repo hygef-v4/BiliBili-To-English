@@ -41,8 +41,8 @@
   "content_scripts": [
     {
       "matches": [
-        "http://*/*",
-        "https://*/*"
+        "https://*.bilibili.com/*",
+        "http://*.bilibili.com/*"
       ],
       "js": [
         "languages/en.js",
