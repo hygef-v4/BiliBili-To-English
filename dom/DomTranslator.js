@@ -146,6 +146,9 @@
       this.creatorGateStartedAt = 0;
       this.creatorGateUrl = "";
       this.handleMutations = this.handleMutations.bind(this);
+      this.titleObserver = null;
+      this.titleOriginal = "";
+      this.titleInjected = "";
     }
 
     async initialize() {
@@ -272,6 +275,8 @@
       this.queueNode(document.body);
       this.startCommentsPoll();
       this.startRescanPoll();
+      this.observePageTitle();
+      this.translatePageTitle();
     }
 
     stop(options) {
@@ -295,12 +300,21 @@
       this.clearCreatorGateTimer();
       this.creatorLayoutReady = true;
       this.creatorGateUrl = "";
+      if (this.titleObserver) {
+        this.titleObserver.disconnect();
+        this.titleObserver = null;
+      }
       if (restore) {
         this.restoreOriginals();
       }
     }
 
     restoreOriginals() {
+      if (this.titleOriginal && document.title === this.titleInjected) {
+        document.title = this.titleOriginal;
+      }
+      this.titleOriginal = "";
+      this.titleInjected = "";
       this.spacingNodes.forEach((node) => {
         if (node && node.isConnected) {
           node.remove();
@@ -373,6 +387,54 @@
           this.queueNode(biliComments.shadowRoot || biliComments);
         }
       }, intervalMs);
+    }
+
+    observePageTitle() {
+      if (this.titleObserver) {
+        this.titleObserver.disconnect();
+        this.titleObserver = null;
+      }
+      const titleEl = document.querySelector("title");
+      if (!titleEl) return;
+      this.titleObserver = new MutationObserver(() => {
+        if (!this.canRun()) return;
+        const current = document.title;
+        // Our own write — ignore to avoid infinite loop
+        if (current === this.titleInjected) return;
+        // Page changed the title (SPA navigation) — re-translate
+        this.titleOriginal = current;
+        this.titleInjected = "";
+        this.translatePageTitle();
+      });
+      this.titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true });
+    }
+
+    translatePageTitle() {
+      if (!this.canRun()) return;
+      if (!this.settings?.areas?.page) return;
+      // Capture original on first call
+      if (!this.titleOriginal) {
+        const current = document.title;
+        if (!current || !current.trim()) return;
+        this.titleOriginal = current;
+      }
+      const source = this.titleOriginal;
+      if (!source || !source.trim()) return;
+      // Already applied with current source
+      if (document.title === this.titleInjected && this.titleInjected) return;
+      this.translationManager
+        .translate(source, {
+          targetLanguage: this.settings?.targetLanguage || "en",
+          area: "page",
+        })
+        .then((result) => {
+          if (!this.running) return;
+          const translated = result?.translation || null;
+          if (!translated || translated === source) return;
+          this.titleInjected = translated;
+          document.title = translated;
+        })
+        .catch(() => {});
     }
 
     observeRoot(root) {
