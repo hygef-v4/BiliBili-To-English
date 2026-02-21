@@ -82,6 +82,16 @@
     /^\s*\d{1,2}[-/.]\d{1,2}([-.\/]\d{2,4})?(\s+\d{1,2}:\d{2}(:\d{2})?)?\s*$/,
   ];
 
+  // Pre-joined selector strings — avoids rebuilding on every node visit
+  const TIME_CONTAINER_SELECTOR = TIME_CONTAINER_SELECTORS.join(",");
+  const AREA_COMBINED_SELECTORS = {
+    comments: AREA_SELECTORS.comments.join(","),
+    dynamic: AREA_SELECTORS.dynamic.join(","),
+    danmaku: AREA_SELECTORS.danmaku.join(","),
+    captions: AREA_SELECTORS.captions.join(","),
+  };
+  const STRICT_ALLOWED_TAGS = new Set(["SPAN", "P", "A", "BUTTON", "LABEL", "H1", "H2", "H3", "LI", "DT", "DD"]);
+
   function isFormControl(el) {
     if (!el || !el.tagName) return false;
     const tag = el.tagName.toUpperCase();
@@ -707,10 +717,10 @@
 
     detectArea(element) {
       if (!element || !element.closest) return "page";
-      if (AREA_SELECTORS.comments.some((selector) => element.closest(selector))) return "comments";
-      if (AREA_SELECTORS.dynamic.some((selector) => element.closest(selector))) return "dynamic";
-      if (AREA_SELECTORS.danmaku.some((selector) => element.closest(selector))) return "danmaku";
-      if (AREA_SELECTORS.captions.some((selector) => element.closest(selector))) return "captions";
+      if (element.closest(AREA_COMBINED_SELECTORS.comments)) return "comments";
+      if (element.closest(AREA_COMBINED_SELECTORS.dynamic)) return "dynamic";
+      if (element.closest(AREA_COMBINED_SELECTORS.danmaku)) return "danmaku";
+      if (element.closest(AREA_COMBINED_SELECTORS.captions)) return "captions";
       return "page";
     }
 
@@ -732,14 +742,12 @@
     }
 
     isTimeContainer(element) {
-      if (!element || !element.matches) return false;
-      return TIME_CONTAINER_SELECTORS.some((selector) => {
-        try {
-          return !!element.closest(selector);
-        } catch (_error) {
-          return false;
-        }
-      });
+      if (!element || !element.closest) return false;
+      try {
+        return !!element.closest(TIME_CONTAINER_SELECTOR);
+      } catch (_error) {
+        return false;
+      }
     }
 
     isTimeLikeText(text) {
@@ -756,8 +764,7 @@
       if (parent && this.isTimeContainer(parent)) return true;
       if (this.isStrictCreatorMode()) {
         const tag = parent?.tagName ? parent.tagName.toUpperCase() : "";
-        const strictAllowed = new Set(["SPAN", "P", "A", "BUTTON", "LABEL", "H1", "H2", "H3", "LI", "DT", "DD"]);
-        if (!strictAllowed.has(tag)) return true;
+        if (!STRICT_ALLOWED_TAGS.has(tag)) return true;
       }
       return false;
     }

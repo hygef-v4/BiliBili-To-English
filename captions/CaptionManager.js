@@ -62,6 +62,10 @@
   const CAPTION_CJK_DOC_PATTERN = /(\u4e2d\u6587|\u6c49\u8bed|\u56fd\u8bed|\u7b80\u4f53|\u7e41\u4f53)/i;
   const CAPTION_AUTO_TRACK_PATTERN = /(ai|auto|machine|translated|translation)/i;
 
+  // Pre-joined selector strings — avoids looping per selector on every node check
+  const CAPTION_INTERACTIVE_ANCESTOR_SELECTOR = CAPTION_INTERACTIVE_ANCESTOR_SELECTORS.join(",");
+  const CAPTION_INTERACTIVE_DESCENDANT_SELECTOR = CAPTION_INTERACTIVE_DESCENDANT_SELECTORS.join(",");
+
   function normalizeLine(text) {
     return String(text || "")
       .replace(/\r/g, "")
@@ -356,7 +360,9 @@
       this.subtitleObserver.observe(document.body, {
         childList: true,
         subtree: true,
-        characterData: true,
+        // characterData omitted intentionally: every text change in the entire page
+        // would fire this observer. The 80 ms subtitle poll covers text updates at
+        // negligible latency cost without the page-wide overhead.
       });
     }
 
@@ -667,11 +673,11 @@
 
     selectPriorityLines(timed, uniqueLines) {
       const now = this.getVideoCurrentTime();
-      const sortedTimed = [...timed].sort((a, b) => a.from - b.from);
+      // timed[] is already sorted by 'from' (built directly from the API response order)
       const preferred = [];
       const seen = new Set();
 
-      sortedTimed.forEach((line) => {
+      timed.forEach((line) => {
         const original = line.original;
         if (!original || seen.has(original)) return;
         const inWindow =
@@ -710,18 +716,35 @@
     findActiveTimedLine(time) {
       if (!this.currentSubtitleData || !Array.isArray(this.currentSubtitleData.timed)) return null;
       const timed = this.currentSubtitleData.timed;
-      const exact = timed.find((line) => time >= line.from && time <= line.to);
-      if (exact) return exact;
+      if (!timed.length) return null;
 
+      // Binary search — timed[] is sorted by 'from'
+      let lo = 0;
+      let hi = timed.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        if (timed[mid].to < time) {
+          lo = mid + 1;
+        } else if (timed[mid].from > time) {
+          hi = mid - 1;
+        } else {
+          return timed[mid]; // time is within [from, to]
+        }
+      }
+
+      // No exact match — scan the narrow vicinity of the insertion point for nearest
       let nearest = null;
       let nearestDelta = Infinity;
-      timed.forEach((line) => {
+      const start = Math.max(0, lo - 1);
+      const end = Math.min(timed.length - 1, lo + 1);
+      for (let i = start; i <= end; i += 1) {
+        const line = timed[i];
         const delta = Math.min(Math.abs(time - line.from), Math.abs(time - line.to));
         if (delta < nearestDelta) {
           nearestDelta = delta;
           nearest = line;
         }
-      });
+      }
       if (nearest && nearestDelta <= CAPTION_ACTIVE_MATCH_TOLERANCE_SECONDS) {
         return nearest;
       }
@@ -801,11 +824,23 @@
       });
 
       if (out.length < CAPTION_WINDOW_PREFETCH_LINES) {
-        let pivot = payload.timed.findIndex((entry) => now >= entry.from && now <= entry.to);
-        if (pivot < 0) {
-          pivot = payload.timed.findIndex((entry) => entry.from > now);
+        // Binary search for current playback position in sorted timed[]
+        let lo = 0;
+        let hi = payload.timed.length - 1;
+        let pivot = -1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >>> 1;
+          if (payload.timed[mid].to < now) {
+            lo = mid + 1;
+          } else if (payload.timed[mid].from > now) {
+            hi = mid - 1;
+          } else {
+            pivot = mid;
+            break;
+          }
         }
-        if (pivot < 0) pivot = payload.timed.length - 1;
+        if (pivot < 0) pivot = lo; // insertion point = first line starting after now
+        if (pivot >= payload.timed.length) pivot = payload.timed.length - 1;
         const start = Math.max(0, pivot - 3);
         for (let i = start; i < payload.timed.length && out.length < CAPTION_WINDOW_PREFETCH_LINES; i += 1) {
           add(payload.timed[i].original);
@@ -1310,13 +1345,11 @@
 
     isCaptionControlNode(element) {
       if (!element || !element.closest) return true;
-      return CAPTION_INTERACTIVE_ANCESTOR_SELECTORS.some((selector) => {
-        try {
-          return !!element.closest(selector);
-        } catch (_error) {
-          return false;
-        }
-      });
+      try {
+        return !!element.closest(CAPTION_INTERACTIVE_ANCESTOR_SELECTOR);
+      } catch (_error) {
+        return false;
+      }
     }
 
     isSafeCaptionTextElement(element) {
@@ -1324,7 +1357,7 @@
       if (this.isCaptionControlNode(element)) return false;
       if (element.closest("[data-bte-owned='1']")) return false;
       if (element.matches && element.matches("button,a,input,select,textarea")) return false;
-      if (CAPTION_INTERACTIVE_DESCENDANT_SELECTORS.some((selector) => element.querySelector(selector))) {
+      if (element.querySelector(CAPTION_INTERACTIVE_DESCENDANT_SELECTOR)) {
         return false;
       }
       if (element.childElementCount > 0 && !this.hasOnlyLineBreakChildren(element)) {
