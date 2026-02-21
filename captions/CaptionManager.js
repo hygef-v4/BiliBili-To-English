@@ -195,6 +195,13 @@
         this.stop({ restore: true });
         return;
       }
+      // If the URL changed, clear stale video state immediately so the urlPoll
+      // (900 ms) doesn't redo the same cleanup redundantly on the same navigation.
+      if (this.lastUrl !== location.href) {
+        this.lastUrl = location.href;
+        this.clearVideoCaches();
+        this.restoreOriginalCaptions();
+      }
       this.start();
       this.bindVideoSignals();
       this.prefetchCurrentVideo(true);
